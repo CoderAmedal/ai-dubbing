@@ -1,1 +1,13 @@
-docs/
+.venv/
+__pycache__/
+*.pyc
+models/
+assets/
+workdir/
+output/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+deepseek.txt
+test/
