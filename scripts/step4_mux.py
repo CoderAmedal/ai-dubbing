@@ -33,10 +33,12 @@ def build_audio(tts_dir: Path, trans: list[dict], out_wav: Path) -> None:
     inputs: list[str] = []
     delays: list[str] = []
     for i, seg in enumerate(trans):
-        mp3 = tts_dir / f"seg_{seg['id']:03d}.mp3"
-        if not mp3.exists():
-            raise FileNotFoundError(f"缺少 TTS 段: {mp3}")
-        inputs += ["-i", str(mp3)]
+        audio_file = tts_dir / f"seg_{seg['id']:03d}.mp3"
+        if not audio_file.exists():
+            audio_file = tts_dir / f"seg_{seg['id']:03d}.wav"
+        if not audio_file.exists():
+            raise FileNotFoundError(f"缺少 TTS 段: seg_{seg['id']:03d} (.mp3/.wav)")
+        inputs += ["-i", str(audio_file)]
         ms = int(seg["start"] * 1000)
         delays.append(f"[{i}:0]adelay={ms}|{ms}[d{i}]")
     mix_in = "".join(f"[d{i}]" for i in range(len(trans)))

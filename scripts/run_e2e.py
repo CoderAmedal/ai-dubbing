@@ -1,7 +1,12 @@
 """端到端入口：视频 → ASR → 翻译 → TTS → 混音 → 成片。
 
 用法:
+  edge-tts（默认）:
     uv run python scripts/run_e2e.py --input assets/demo.mp4 --output output/out.mp4
+  gpt-sovits（音色克隆）:
+    uv run python scripts/run_e2e.py --input assets/demo.mp4 --output output/out.mp4 \
+      --tts gpt-sovits --ref-audio workdir/sovits/ref_audio.wav \
+      --prompt-text "Hello everyone, welcome to the AI dubbing studio."
 
 依赖环境变量 DEEPSEEK_API_KEY（步骤2 翻译）。
 """
@@ -21,13 +26,23 @@ from common import (
 )
 from step1_asr import extract_audio, to_srt, transcribe
 from step2_translate import translate_text
-from step3_tts import synth_sync
+from step3_tts import synth_edge_tts, synth_sovits
 from step4_mux import build_audio, make_srt, mux
 
 log = logging.getLogger("run_e2e")
 
 
-def run_pipeline(input_video: Path, out_path: Path, model_dir: Path) -> None:
+def run_pipeline(
+    input_video: Path,
+    out_path: Path,
+    model_dir: Path,
+    tts_backend: str = "edge-tts",
+    ref_audio: str | None = None,
+    prompt_lang: str = "en",
+    prompt_text: str = "",
+    sovits_api: str = "http://127.0.0.1:9880",
+    speed: float = 1.0,
+) -> None:
     work = ensure_workdir(f"e2e/{input_video.stem}")
 
     # 1. ASR
@@ -56,11 +71,24 @@ def run_pipeline(input_video: Path, out_path: Path, model_dir: Path) -> None:
     dump_json(translated, trans_json)
 
     # 3. TTS
-    log.info("=== 步骤 3/4: TTS (edge-tts) ===")
     tts_dir = work / "tts"
     tts_dir.mkdir(parents=True, exist_ok=True)
-    for seg in translated:
-        synth_sync(seg, tts_dir / f"seg_{seg['id']:03d}.mp3")
+    if tts_backend == "gpt-sovits":
+        log.info("=== 步骤 3/4: TTS (gpt-sovits 音色克隆) ===")
+        for seg in translated:
+            synth_sovits(
+                seg,
+                tts_dir / f"seg_{seg['id']:03d}.wav",
+                ref_audio=ref_audio,
+                prompt_lang=prompt_lang,
+                prompt_text=prompt_text,
+                api_url=sovits_api,
+                speed_factor=speed,
+            )
+    else:
+        log.info("=== 步骤 3/4: TTS (edge-tts) ===")
+        for seg in translated:
+            synth_edge_tts(seg, tts_dir / f"seg_{seg['id']:03d}.mp3")
 
     # 4. 混音 + 字幕
     log.info("=== 步骤 4/4: 混音 + 烧录字幕 ===")
@@ -79,9 +107,28 @@ def main() -> None:
     parser.add_argument("--input", type=Path, required=True, help="输入视频")
     parser.add_argument("--output", type=Path, default=PROJECT_ROOT / "output" / "out.mp4")
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL_DIR)
+    parser.add_argument("--tts", choices=["edge-tts", "gpt-sovits"], default="edge-tts", help="TTS 后端")
+    parser.add_argument("--ref-audio", type=Path, default=None, help="参考音频 (gpt-sovits)")
+    parser.add_argument("--prompt-lang", default="en", help="参考音频语言 (gpt-sovits)")
+    parser.add_argument("--prompt-text", default="", help="参考音频转写文本 (gpt-sovits)")
+    parser.add_argument("--sovits-api", default="http://127.0.0.1:9880", help="GPT-SoVITS API 地址")
+    parser.add_argument("--speed", type=float, default=1.0, help="语速因子 (gpt-sovits)")
     args = parser.parse_args()
 
-    run_pipeline(args.input, args.output, args.model)
+    if args.tts == "gpt-sovits" and args.ref_audio is None:
+        parser.error("--tts gpt-sovits 需要 --ref-audio")
+
+    run_pipeline(
+        args.input,
+        args.output,
+        args.model,
+        tts_backend=args.tts,
+        ref_audio=str(args.ref_audio) if args.ref_audio else None,
+        prompt_lang=args.prompt_lang,
+        prompt_text=args.prompt_text,
+        sovits_api=args.sovits_api,
+        speed=args.speed,
+    )
 
 
 if __name__ == "__main__":
