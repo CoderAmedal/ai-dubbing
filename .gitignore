@@ -11,3 +11,6 @@ dist/
 build/
 deepseek.txt
 test/
+
+# 外部工具仓库（嵌套 git，不入库，单独克隆）
+tools/GPT-SoVITS-CPUFast/
