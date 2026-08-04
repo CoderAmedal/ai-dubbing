@@ -1,6 +1,7 @@
 """步骤 1：ASR 验证 — 语音识别 + 时间戳。
 
 用法: uv run python scripts/step1_asr.py --input assets/demo.mp4 --out workdir/asr/segments.json
+      uv run python scripts/step1_asr.py --input assets/demo_multi.mp4 --diarize --num-speakers 2
 产出: 带时间戳的分段 JSON（同时生成 SRT 字幕）。
 """
 
@@ -88,6 +89,34 @@ def to_srt(segments: list[dict]) -> str:
     return "\n".join(blocks)
 
 
+def merge_speakers(
+    asr_segments: list[dict],
+    diarize_segments: list[dict],
+) -> list[dict]:
+    """将说话人标签合并到 ASR 分段（基于时间重叠）。
+
+    对每个 ASR 分段，找到与其时间重叠最长的 diarize 分段，
+    将其 speaker 标签赋给该 ASR 分段。
+    """
+    for asr_seg in asr_segments:
+        best_speaker = "UNKNOWN"
+        best_overlap = 0.0
+
+        for diar_seg in diarize_segments:
+            # 计算两个时间段的重叠时长
+            overlap_start = max(asr_seg["start"], diar_seg["start"])
+            overlap_end = min(asr_seg["end"], diar_seg["end"])
+            overlap = max(0.0, overlap_end - overlap_start)
+
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_speaker = diar_seg["speaker"]
+
+        asr_seg["speaker"] = best_speaker
+
+    return asr_segments
+
+
 def main() -> None:
     setup_logging()
     parser = argparse.ArgumentParser(description="ASR 识别")
@@ -95,12 +124,30 @@ def main() -> None:
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL_DIR)
     parser.add_argument("--work", type=Path, default=PROJECT_ROOT / "workdir" / "asr")
     parser.add_argument("--out", type=Path, default=None, help="分段 JSON 输出路径")
+    parser.add_argument(
+        "--diarize",
+        action="store_true",
+        help="启用说话人分离（需先安装 diarize 库）",
+    )
+    parser.add_argument(
+        "--num-speakers",
+        type=int,
+        default=None,
+        help="预期说话人数量（配合 --diarize 使用，默认自动检测）",
+    )
     args = parser.parse_args()
 
     work = ensure_workdir(args.work.name)
     audio = work / "audio.wav"
     extract_audio(args.input, audio)
     segments = transcribe(audio, args.model)
+
+    # 合并说话人标签
+    if args.diarize:
+        from speaker_diarize import run_diarization
+
+        diarize_segs = run_diarization(audio, num_speakers=args.num_speakers)
+        segments = merge_speakers(segments, diarize_segs)
 
     out_json = args.out or work / "segments.json"
     dump_json(segments, out_json)
@@ -109,7 +156,8 @@ def main() -> None:
     log.info("ASR 完成: %d 段 -> %s / %s", len(segments), out_json, srt_path)
 
     for seg in segments:
-        log.info("  [%6.2f -> %6.2f] %s", seg["start"], seg["end"], seg["text"])
+        speaker = seg.get("speaker", "")
+        log.info("  [%6.2f -> %6.2f] %s %s", seg["start"], seg["end"], speaker, seg["text"])
 
 
 if __name__ == "__main__":

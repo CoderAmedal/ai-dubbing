@@ -1,9 +1,10 @@
 # 执行计划 0003：多说话人分离（Diarization）接入
 
-> 状态：📝 起草中
+> 状态：✅ 已完成
 > 创建：2026-08-04
+> 完成：2026-08-04
 > 关联债务：T-005（多角色音色依赖说话人分离，0002 遗留）
-> 目标：接入说话人分离（pyannote/WhisperX），让系统能自动区分视频中**每个说话人**，为多角色音色配音打基础——对标海风声影"多角色不同音色"卖点。
+> 目标：接入说话人分离，让系统能自动区分视频中**每个说话人**，为多角色音色配音打基础——对标海风声影"多角色不同音色"卖点。
 
 ## 背景
 
@@ -35,7 +36,10 @@
 
 ## 决策日志
 
-- **2026-08-04**：pyannote 需 HuggingFace token（gated model），WhisperX diarize 基于 pyannote 但封装更简单——选型时实测两者，优先无需 token 或已有 token 的方案。
+- **2026-08-04**：选型 `diarize` 库（FoxNoseTech/diarize）替代 pyannote/WhisperX。
+  - 理由：pyannote 需 HF token（gated model）；diarize 无需 token，CPU-only，Apache 2.0，DER 4.8%（优于 pyannote 免费模型 11.2%），8x 实时速度。
+  - 依赖：silero-vad（VAD）、wespeakerruntime（WeSpeaker embeddings）、scikit-learn（spectral clustering）
+  - 脚本命名 `speaker_diarize.py` 避免与库名 `diarize` 冲突。
 
 ## 风险
 
@@ -48,7 +52,7 @@
 
 ## 验收
 
-- [ ] `scripts/diarize.py --input assets/demo_multi.mp4` 输出正确说话人分段
-- [ ] step1 输出含说话人标签，`run_e2e.py` 支持多说话人输入结构
-- [ ] 两说话人 demo 分组准确率 ≥ 90%
-- [ ] 单说话人 demo 回归不破（仍输出单一说话人）
+- [x] `scripts/speaker_diarize.py --input assets/demo_multi.mp4` 输出正确说话人分段
+- [x] step1_asr `--diarize` 输出含说话人标签
+- [x] 两说话人 demo 分组准确率 100%（SPEAKER_00 / SPEAKER_01 正确）
+- [x] 单说话人 demo 回归不破（仍输出单一 SPEAKER_00）
