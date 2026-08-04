@@ -9,6 +9,8 @@
 | T-002 | 翻译用 DeepSeek API（联网），本地 Qwen 未验证 | 违反"素材不出本机"主打卖点，需联网 | 2026-08-04 | 待办（14GB 内存偏紧） |
 | T-003 | 本机 `all_proxy=socks://` 前缀 httpx 不识别，联网脚本前需 `unset all_proxy ALL_PROXY` | 环境不友好，易踩坑 | 2026-08-04 | 待办（建议把代理改为 socks5h 前缀） |
 | T-004 | `docs/` 曾被 .gitignore 忽略，文档仓库化修复后需确认历史 | 曾导致仓库外知识不可见 | 2026-08-04 | 已修复（本轮） |
+| T-006 | `check_architecture.py`（AGENTS.md 提及）尚未创建 | 架构边界无 lint 强制执行 | 2026-08-04 | 待办（编码为 CI 检查） |
+| T-007 | diarize/torch 依赖需 CPU 版（torch 走 pytorch CPU index，无法写入 pyproject 普通依赖） | 环境重建需手动装 CPU torch | 2026-08-04 | 待办（补环境安装文档/脚本） |
 
 ## 清理原则（黄金原则）
 

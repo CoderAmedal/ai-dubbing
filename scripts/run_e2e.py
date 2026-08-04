@@ -7,6 +7,9 @@
     uv run python scripts/run_e2e.py --input assets/demo.mp4 --output output/out.mp4 \
       --tts gpt-sovits --ref-audio workdir/sovits/ref_audio.wav \
       --prompt-text "Hello everyone, welcome to the AI dubbing studio."
+  gpt-sovits（多角色，各说话人自动克隆音色）:
+    uv run python scripts/run_e2e.py --input assets/demo_multi.mp4 --output output/out_multi.mp4 \
+      --tts gpt-sovits --multi-speaker --diarize
 
 依赖环境变量 DEEPSEEK_API_KEY（步骤2 翻译）。
 """
@@ -24,6 +27,8 @@ from common import (
     ensure_workdir,
     setup_logging,
 )
+from speaker_diarize import run_diarization
+from speaker_ref import extract_references
 from step1_asr import extract_audio, to_srt, transcribe
 from step2_translate import translate_text
 from step3_tts import synth_edge_tts, synth_sovits
@@ -42,56 +47,88 @@ def run_pipeline(
     prompt_text: str = "",
     sovits_api: str = "http://127.0.0.1:9880",
     speed: float = 1.0,
+    multi_speaker: bool = False,
+    num_speakers: int | None = None,
 ) -> None:
     work = ensure_workdir(f"e2e/{input_video.stem}")
 
-    # 1. ASR
-    log.info("=== 步骤 1/4: ASR 识别 ===")
+    # 1. ASR（多角色模式额外做说话人分离）
+    if multi_speaker:
+        log.info("=== 步骤 1/5: ASR + 说话人分离 ===")
+    else:
+        log.info("=== 步骤 1/4: ASR 识别 ===")
     audio = work / "audio.wav"
     extract_audio(input_video, audio)
     segments = transcribe(audio, model_dir)
+    if multi_speaker:
+        diarize_segs = run_diarization(audio, num_speakers=num_speakers)
+        from step1_asr import merge_speakers
+
+        segments = merge_speakers(segments, diarize_segs)
     seg_json = work / "segments.json"
     dump_json(segments, seg_json)
     seg_json.with_suffix(".srt").write_text(to_srt(segments), encoding="utf-8")
 
-    # 2. 翻译
-    log.info("=== 步骤 2/4: 翻译 (DeepSeek) ===")
+    # 2. 多角色模式：提取各说话人参考音频
+    ref_map: dict | None = None
+    if multi_speaker and tts_backend == "gpt-sovits":
+        log.info("=== 步骤 2/5: 提取各说话人参考音频 ===")
+        ref_map = extract_references(
+            audio, diarize_segs, work / "refs", model_dir
+        )
+
+    # 3. 翻译
+    if multi_speaker:
+        log.info("=== 步骤 3/5: 翻译 (DeepSeek) ===")
+    else:
+        log.info("=== 步骤 2/4: 翻译 (DeepSeek) ===")
     translated = []
     for seg in segments:
-        translated.append(
-            {
-                "id": seg["id"],
-                "start": seg["start"],
-                "end": seg["end"],
-                "src": seg["text"],
-                "tgt": translate_text(seg["text"]),
-            }
-        )
+        item = {
+            "id": seg["id"],
+            "start": seg["start"],
+            "end": seg["end"],
+            "src": seg["text"],
+            "tgt": translate_text(seg["text"]),
+        }
+        if multi_speaker:
+            item["speaker"] = seg.get("speaker", "UNKNOWN")
+        translated.append(item)
     trans_json = work / "translations.json"
     dump_json(translated, trans_json)
 
-    # 3. TTS
+    # 4. TTS
     tts_dir = work / "tts"
     tts_dir.mkdir(parents=True, exist_ok=True)
     if tts_backend == "gpt-sovits":
-        log.info("=== 步骤 3/4: TTS (gpt-sovits 音色克隆) ===")
+        log.info("=== 步骤 4/5: TTS (gpt-sovits 音色克隆) ===")
         for seg in translated:
+            if ref_map is not None:
+                speaker = seg.get("speaker", "UNKNOWN")
+                cfg = ref_map[speaker]
+                seg_ref_audio = cfg["audio"]
+                seg_prompt_lang = cfg.get("prompt_lang", prompt_lang)
+                seg_prompt_text = cfg.get("prompt_text", prompt_text)
+            else:
+                seg_ref_audio = ref_audio
+                seg_prompt_lang = prompt_lang
+                seg_prompt_text = prompt_text
             synth_sovits(
                 seg,
                 tts_dir / f"seg_{seg['id']:03d}.wav",
-                ref_audio=ref_audio,
-                prompt_lang=prompt_lang,
-                prompt_text=prompt_text,
+                ref_audio=seg_ref_audio,
+                prompt_lang=seg_prompt_lang,
+                prompt_text=seg_prompt_text,
                 api_url=sovits_api,
                 speed_factor=speed,
             )
     else:
-        log.info("=== 步骤 3/4: TTS (edge-tts) ===")
+        log.info("=== 步骤 4/5: TTS (edge-tts) ===")
         for seg in translated:
             synth_edge_tts(seg, tts_dir / f"seg_{seg['id']:03d}.mp3")
 
-    # 4. 混音 + 字幕
-    log.info("=== 步骤 4/4: 混音 + 烧录字幕 ===")
+    # 5. 混音 + 字幕
+    log.info("=== 步骤 5/5: 混音 + 烧录字幕 ===")
     voiceover = work / "voiceover.wav"
     build_audio(tts_dir, translated, voiceover)
     srt = work / "subs_zh.srt"
@@ -113,10 +150,21 @@ def main() -> None:
     parser.add_argument("--prompt-text", default="", help="参考音频转写文本 (gpt-sovits)")
     parser.add_argument("--sovits-api", default="http://127.0.0.1:9880", help="GPT-SoVITS API 地址")
     parser.add_argument("--speed", type=float, default=1.0, help="语速因子 (gpt-sovits)")
+    parser.add_argument(
+        "--multi-speaker",
+        action="store_true",
+        help="多角色模式：自动分离说话人并为每个角色提取/克隆音色",
+    )
+    parser.add_argument(
+        "--num-speakers",
+        type=int,
+        default=None,
+        help="预期说话人数量（配合 --multi-speaker，默认自动检测）",
+    )
     args = parser.parse_args()
 
-    if args.tts == "gpt-sovits" and args.ref_audio is None:
-        parser.error("--tts gpt-sovits 需要 --ref-audio")
+    if args.tts == "gpt-sovits" and args.ref_audio is None and not args.multi_speaker:
+        parser.error("--tts gpt-sovits 需要 --ref-audio 或 --multi-speaker")
 
     run_pipeline(
         args.input,
@@ -128,6 +176,8 @@ def main() -> None:
         prompt_text=args.prompt_text,
         sovits_api=args.sovits_api,
         speed=args.speed,
+        multi_speaker=args.multi_speaker,
+        num_speakers=args.num_speakers,
     )
 
 

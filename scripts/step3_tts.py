@@ -3,10 +3,14 @@
 用法:
   edge-tts（默认）:
     uv run python scripts/step3_tts.py --input workdir/trans/translations.json --out workdir/tts/
-  gpt-sovits（音色克隆）:
+  gpt-sovits（音色克隆，单说话人）:
     uv run python scripts/step3_tts.py --input workdir/trans/translations.json --tts gpt-sovits \
       --ref-audio workdir/sovits/ref_audio.wav --prompt-lang en \
       --prompt-text "Hello everyone, welcome to the AI dubbing studio."
+  gpt-sovits（多说话人，per-speaker 音色）:
+    uv run python scripts/step3_tts.py --input workdir/trans/translations.json --tts gpt-sovits \
+      --ref-map workdir/refs/refs.json
+    （translations.json 每段需含 speaker 字段，refs.json 来自 speaker_ref.py）
 """
 
 from __future__ import annotations
@@ -57,25 +61,51 @@ def synth_sovits(
     log.info("  [%s] (gpt-sovits) %s -> %s", seg["id"], seg["tgt"], wav_path.name)
 
 
+def resolve_ref(
+    seg: dict,
+    ref_map: dict | None,
+    args: argparse.Namespace,
+) -> tuple[str, str, str]:
+    """解析本段的参考音频配置。
+
+    多说话人（--ref-map）: 按 seg['speaker'] 查表；
+    单说话人（--ref-audio）: 使用统一参考音频。
+    """
+    if ref_map:
+        speaker = seg.get("speaker", "UNKNOWN")
+        cfg = ref_map.get(speaker)
+        if cfg is None:
+            raise RuntimeError(f"缺少说话人 {speaker} 的参考音频配置")
+        return (
+            cfg["audio"],
+            cfg.get("prompt_lang", args.prompt_lang),
+            cfg.get("prompt_text", args.prompt_text),
+        )
+    return str(args.ref_audio), args.prompt_lang, args.prompt_text
+
+
 def main() -> None:
     setup_logging()
     parser = argparse.ArgumentParser(description="TTS 中文配音")
     parser.add_argument("--input", type=Path, required=True, help="translations.json")
     parser.add_argument("--out", type=Path, default=None, help="输出目录")
     parser.add_argument("--tts", choices=["edge-tts", "gpt-sovits"], default="edge-tts", help="TTS 后端")
-    parser.add_argument("--ref-audio", type=Path, default=None, help="参考音频路径（gpt-sovits 必填）")
+    parser.add_argument("--ref-audio", type=Path, default=None, help="参考音频路径（gpt-sovits 单说话人必填）")
+    parser.add_argument("--ref-map", type=Path, default=None, help="per-speaker 参考音频配置 (gpt-sovits 多说话人)")
     parser.add_argument("--prompt-lang", default="en", help="参考音频语言")
     parser.add_argument("--prompt-text", default="", help="参考音频转写文本")
     parser.add_argument("--sovits-api", default="http://127.0.0.1:9880", help="GPT-SoVITS API 地址")
     parser.add_argument("--speed", type=float, default=1.0, help="语速因子 (gpt-sovits)")
     args = parser.parse_args()
 
-    if args.tts == "gpt-sovits" and args.ref_audio is None:
-        parser.error("--tts gpt-sovits 需要 --ref-audio")
+    if args.tts == "gpt-sovits" and args.ref_audio is None and args.ref_map is None:
+        parser.error("--tts gpt-sovits 需要 --ref-audio 或 --ref-map")
 
     segments = load_json(args.input)
     out_dir = args.out or (args.input.parent.parent / "tts")
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_map = load_json(args.ref_map) if args.ref_map else None
 
     for seg in segments:
         out_path = out_dir / f"seg_{seg['id']:03d}.wav"
@@ -83,12 +113,13 @@ def main() -> None:
             mp3_out = out_dir / f"seg_{seg['id']:03d}.mp3"
             synth_edge_tts(seg, mp3_out)
         else:
+            ref_audio, prompt_lang, prompt_text = resolve_ref(seg, ref_map, args)
             synth_sovits(
                 seg,
                 out_path,
-                ref_audio=str(args.ref_audio),
-                prompt_lang=args.prompt_lang,
-                prompt_text=args.prompt_text,
+                ref_audio=ref_audio,
+                prompt_lang=prompt_lang,
+                prompt_text=prompt_text,
                 api_url=args.sovits_api,
                 speed_factor=args.speed,
             )
