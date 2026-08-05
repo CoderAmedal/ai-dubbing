@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 配音工作台</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>AI 配音工作台</h1>
+    <p class="subtitle">本地视频翻译配音 · 素材不出本机</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>0. 设置</h2>
+      <label class="field">
+        <span>DeepSeek API Key（翻译用，仅存本机）</span>
+        <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off" />
+      </label>
+      <button id="saveKeyBtn" class="btn">保存 API Key</button>
+      <span id="keyStatus" class="status"></span>
+    </section>
+
+    <section class="card">
+      <h2>1. 导入视频</h2>
+      <div class="row">
+        <input type="text" id="videoPath" placeholder="输入视频路径，如 /home/me/video.mp4" />
+        <button id="browseBtn" class="btn" title="在桌面上浏览文件">浏览…</button>
+      </div>
+      <div class="row quick">
+        <span>快速选择:</span>
+        <button class="chip" data-path="assets/demo.mp4">demo.mp4</button>
+        <button class="chip" data-path="assets/demo_multi.mp4">demo_multi.mp4</button>
+        <button class="chip" data-path="assets/demo_real.mp4">demo_real.mp4</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2. 配音设置</h2>
+      <label class="field">
+        <span>TTS 后端</span>
+        <select id="ttsBackend">
+          <option value="edge-tts">edge-tts（快速，中性音色）</option>
+          <option value="gpt-sovits" selected>GPT-SoVITS（克隆原说话人音色）</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>说话人模式</span>
+        <select id="multiSpeaker">
+          <option value="false" selected>单说话人（默认）</option>
+          <option value="true">多说话人（自动分离 + 各自克隆）</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>时间轴</span>
+        <select id="elasticTimeline">
+          <option value="true" selected>弹性时间轴（中文语速自然，推荐）</option>
+          <option value="false">硬对齐（按原时间轴）</option>
+        </select>
+      </label>
+
+      <div id="sovitsOpts" class="nested">
+        <label class="field">
+          <span>参考音频路径（单说话人模式）</span>
+          <input type="text" id="refAudio" placeholder="如 workdir/sovits/ref_audio.wav（多说话人模式自动提取，可留空）" />
+        </label>
+        <label class="field">
+          <span>参考音频转写文本（可选，提高克隆准确度）</span>
+          <input type="text" id="promptText" placeholder="参考音频中说的一句话" />
+        </label>
+      </div>
+
+      <label class="field">
+        <span>预期说话人数（多说话人模式，留空自动检测）</span>
+        <input type="number" id="numSpeakers" placeholder="自动检测" min="1" />
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>3. 开始处理</h2>
+      <div class="row">
+        <button id="startBtn" class="btn primary">开始配音</button>
+        <span id="status" class="status">就绪</span>
+      </div>
+      <div id="progressWrap" class="progress-wrap hidden">
+        <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+        <div class="progress-info">
+          <span id="progressPct">0%</span>
+          <span id="progressMsg"></span>
+        </div>
+      </div>
+      <div id="result" class="result hidden">
+        <p class="ok">✓ 成片已生成</p>
+        <video id="resultVideo" controls></video>
+        <div class="row">
+          <a id="openResult" class="btn" href="#" target="_blank">打开成片</a>
+        </div>
+      </div>
+      <div id="error" class="error hidden"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
