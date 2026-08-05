@@ -163,9 +163,12 @@ def extract_references(
     audio: Path,
     diarize_segments: list[dict],
     work_dir: Path,
-    model_dir: Path,
+    model_dir: Path | None = None,
 ) -> dict:
-    """为每个说话人生成参考音频 + prompt 文本，返回 refs 配置。"""
+    """为每个说话人生成参考音频 + prompt 文本，返回 refs 配置。
+
+    model_dir 为 None 时跳过 prompt 文本识别（GPT-SoVITS prompt_text 留空）。
+    """
     duration = audio_duration(audio)
     log.info("音频时长 %.2fs", duration)
 
@@ -183,9 +186,11 @@ def extract_references(
         clip = work_dir / f"{speaker}.wav"
         extract_clip(audio, best["start"], best["end"], clip)
 
-        segs_text = transcribe(clip, model_dir)
-        prompt_text = " ".join(s["text"] for s in segs_text).strip()
-        log.info("说话人 %s prompt_text: %s", speaker, prompt_text)
+        prompt_text = ""
+        if model_dir is not None:
+            segs_text = transcribe(clip, model_dir)
+            prompt_text = " ".join(s["text"] for s in segs_text).strip()
+            log.info("说话人 %s prompt_text: %s", speaker, prompt_text)
 
         refs[speaker] = {
             "audio": str(clip.resolve()),

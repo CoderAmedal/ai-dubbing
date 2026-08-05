@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 配音工作台</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/pages.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 左侧导航栏 -->
+    <aside id="sidebar">
+      <div class="logo" title="AI 配音工作台">S</div>
+      <nav id="nav"></nav>
+      <div class="sidebar-bottom" id="navBottom"></div>
+    </aside>
+
+    <!-- 主列：顶栏 + 内容 + 状态栏 -->
+    <div id="mainCol">
+      <header id="topbar">
+        <h1 id="viewTitle">启动台</h1>
+        <div class="search-box" id="searchBox">
+          <span class="search-icon" id="searchIcon"></span>
+          <input id="globalSearch" type="text" placeholder="搜索或跳转..." autocomplete="off" />
+          <kbd>CtrlK</kbd>
+          <div id="searchResults" class="search-results hidden"></div>
+        </div>
+        <div class="topbar-right">
+          <span class="mode-pill">⚡ 自动 · <span id="modeHint">待首次任务</span></span>
+          <button class="icon-btn" id="helpBtn" title="帮助">?</button>
+          <button class="icon-btn" id="themeBtn" title="主题">☾</button>
+        </div>
+      </header>
+
+      <div id="contentWrap">
+        <main id="view"></main>
+        <aside id="rightPanel"></aside>
+      </div>
+
+      <footer id="statusbar">
+        <span id="sbEngine">引擎：检测中…</span>
+        <span class="sb-right">
+          <span id="sbGpu">GPU：待检测</span>
+          <span id="sbVersion"></span>
+        </span>
+      </footer>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+  <script src="/static/views-config.js"></script>
+  <script src="/static/views-library.js"></script>
+  <script src="/static/views-media.js"></script>
+  <script src="/static/views-dub.js"></script>
+</body>
+</html>

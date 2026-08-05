@@ -68,13 +68,16 @@ Types → Config → Repo → Service → Runtime → UI
 ```bash
 # Python 后端
 uv venv && uv pip install -e ".[dev]"
-uv run pytest
+
+# 测试 / lint（⚠️ 勿用 uv run：会按 uv.lock 重装 CUDA torch，见 T-011）
+.venv/bin/python -m pytest
+.venv/bin/python -m ruff check scripts/ backend/ tests/
 
 # 前端/桌面壳
 cd app && cargo build
 
 # 结构检查
-uv run python scripts/check_architecture.py
+uv run python scripts/check_architecture.py   # 待实现（T-006）
 ```
 
 ## 给智能体的提示

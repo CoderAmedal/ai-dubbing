@@ -8,10 +8,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from runtime import resolve_model_dir, resolve_output_dir, resolve_workdir
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MODEL_DIR = PROJECT_ROOT / "models" / "faster-whisper-small"
-DEFAULT_WORKDIR = PROJECT_ROOT / "workdir"
-DEFAULT_OUTPUT = PROJECT_ROOT / "output"
+# 兼容旧引用：默认值走 runtime 解析（dev=仓库，打包=用户数据目录）
+DEFAULT_MODEL_DIR = resolve_model_dir() / "faster-whisper-small"
+DEFAULT_WORKDIR = resolve_workdir()
+DEFAULT_OUTPUT = resolve_output_dir()
 
 
 def setup_logging(level: int = logging.INFO) -> None:

@@ -116,6 +116,81 @@ def mux(video: Path, audio: Path, srt: Path, out: Path) -> None:
     log.info("成片输出（含烧录字幕）: %s", out)
 
 
+def mux_elastic(video: Path, audio: Path, srt: Path, out: Path) -> None:
+    """弹性时间轴模式：配音长于视频时冻结末帧延长视频，避免截断结尾语音。"""
+    ffmpeg = get_ffmpeg()
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    audio_dur = audio_duration(audio)
+    video_dur = video_duration(video)
+
+    vf = (
+        "subtitles=" + srt.as_posix()
+        + ":force_style='FontName=Noto Serif CJK SC,FontSize=18,"
+        + "PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BorderStyle=1,Outline=2'"
+    )
+    if audio_dur > video_dur + 0.05:
+        # 冻结末帧延长到配音长度
+        vf = f"tpad=stop_mode=clone:stop_duration={audio_dur - video_dur:.3f},{vf}"
+        log.info("视频延长 %.2fs 以容纳配音", audio_dur - video_dur)
+
+    run(
+        [
+            ffmpeg,
+            "-y",
+            "-i",
+            str(video),
+            "-i",
+            str(audio),
+            "-vf",
+            vf,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "23",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+            "-shortest",
+            str(out),
+        ]
+    )
+    log.info("成片输出（弹性时间轴+烧录字幕）: %s", out)
+
+
+def audio_duration(path: Path) -> float:
+    import soundfile as sf
+
+    return sf.info(str(path)).duration
+
+
+def video_duration(path: Path) -> float:
+    """用 ffmpeg probe 视频时长（只读头部，不解码全片）。"""
+    import subprocess
+
+    ffmpeg = get_ffmpeg()
+    result = subprocess.run(
+        [ffmpeg, "-i", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    import re
+
+    match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr)
+    if not match:
+        raise RuntimeError(f"无法读取视频时长: {path}")
+    h, m, s = match.groups()
+    return int(h) * 3600 + int(m) * 60 + float(s)
+
+
 def main() -> None:
     setup_logging()
     parser = argparse.ArgumentParser(description="混音合成")

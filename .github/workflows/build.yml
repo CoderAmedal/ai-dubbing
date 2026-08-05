@@ -1,0 +1,70 @@
+name: Build 绿色版
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev
+      - name: 安装 uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: 构建捆绑 env（CPU torch）+ 资源
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"
+          python scripts/package/build.py --skip-tauri
+      - name: 构建 AppImage
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          . .venv/bin/activate
+          cd app && npm install && npm run tauri build
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: aidubbing-linux
+          path: app/src-tauri/target/release/bundle/**/*
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 安装 uv
+        shell: pwsh
+        run: |
+          irm https://astral.sh/uv/install.ps1 | iex
+          echo "$env:USERPROFILE\.local\bin" | Out-File -Append $env:GITHUB_PATH
+      - name: 构建捆绑 env + 资源
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\activate
+          pip install -e ".[dev]"
+          python scripts/package/build.py --skip-tauri
+      - name: 构建 NSIS
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\activate
+          cd app
+          npm install
+          npm run tauri build
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: aidubbing-windows
+          path: app/src-tauri/target/release/bundle/**/*
