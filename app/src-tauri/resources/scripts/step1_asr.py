@@ -89,6 +89,42 @@ def to_srt(segments: list[dict]) -> str:
     return "\n".join(blocks)
 
 
+def parse_srt(path: Path) -> list[dict]:
+    """解析 SRT 字幕为分段列表（与 to_srt 互逆）。
+
+    返回 [{"id", "start", "end", "text"}]，时间单位秒。
+    """
+    import re
+
+    def parse_ts(ts: str) -> float:
+        h, m, rest = ts.strip().split(":")
+        s, ms = rest.split(",")
+        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+
+    text = Path(path).read_text(encoding="utf-8-sig")
+    segs = []
+    for i, block in enumerate(re.split(r"\n\s*\n", text.strip())):
+        lines = [ln for ln in block.strip().splitlines() if ln.strip()]
+        if not lines:
+            continue
+        if "-->" in lines[0]:
+            ts_line, text_lines = lines[0], lines[1:]
+        elif len(lines) >= 2 and "-->" in lines[1]:
+            ts_line, text_lines = lines[1], lines[2:]
+        else:
+            continue
+        start_s, end_s = (t.strip() for t in ts_line.split("-->"))
+        segs.append(
+            {
+                "id": len(segs),
+                "start": parse_ts(start_s),
+                "end": parse_ts(end_s),
+                "text": "\n".join(text_lines),
+            }
+        )
+    return segs
+
+
 def merge_speakers(
     asr_segments: list[dict],
     diarize_segments: list[dict],

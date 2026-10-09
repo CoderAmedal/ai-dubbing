@@ -46,6 +46,7 @@ class Task:
         )
 
     def to_dict(self) -> dict:
+        video = self.params.get("video_path", "")
         return {
             "id": self.id,
             "status": self.status,
@@ -54,6 +55,8 @@ class Task:
             "result": self.result,
             "error": self.error,
             "created_at": self.created_at,
+            "video_name": video.split("/")[-1] if video else "",
+            "kind": self.params.get("kind", "pipeline"),
         }
 
 
@@ -71,6 +74,11 @@ class TaskManager:
     def get(self, task_id: str) -> Task | None:
         with self._lock:
             return self._tasks.get(task_id)
+
+    def list(self) -> list[Task]:
+        """全部任务，按创建时间倒序。"""
+        with self._lock:
+            return sorted(self._tasks.values(), key=lambda t: t.created_at, reverse=True)
 
     def run(self, task: Task, runner: callable) -> None:
         def _run() -> None:

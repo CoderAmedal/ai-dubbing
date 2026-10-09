@@ -22,6 +22,8 @@ from runtime import resolve_data_dir
 log = logging.getLogger("glossary")
 
 GLOSSARY_FILE = "glossary.json"
+GLOSSARIES_DIR = "glossaries"
+META_FILE = "_meta.json"
 
 
 class GlossaryStore:
@@ -95,5 +97,127 @@ class GlossaryStore:
 
 
 def load_glossary() -> dict[str, str]:
-    """便捷加载（无词库时返回空 dict）。"""
-    return GlossaryStore().items
+    """便捷加载（无词库时返回空 dict）。
+
+    多套词库模式下：合并所有"已启用"词库（从上到下优先，后者覆盖前者）。
+    旧版单文件 glossary.json 存在时自动并入（视为默认启用词库）。
+    """
+    lib = GlossaryLibrary()
+    return lib.merged_items()
+
+
+class GlossaryLibrary:
+    """多套词库管理（词库页）：每套词库一个 JSON 文件 + 启用开关 + 顺序。
+
+    存储：数据目录 glossaries/<name>.json（词条）+ glossaries/_meta.json（顺序与启用状态）。
+    旧版单文件 glossary.json 自动迁移为"默认词库"。
+    """
+
+    def __init__(self, root: Path | None = None) -> None:
+        self.root = root or (resolve_data_dir() / GLOSSARIES_DIR)
+        self._default_root = root is None
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.meta_path = self.root / META_FILE
+        if self._default_root:
+            self._migrate_legacy()
+
+    def _migrate_legacy(self) -> None:
+        legacy = resolve_data_dir() / GLOSSARY_FILE
+        default_file = self.root / "默认词库.json"
+        if legacy.exists() and not default_file.exists():
+            try:
+                items = {k: v for k, v in load_json(legacy).items() if k and v}
+            except Exception:  # noqa: BLE001
+                items = {}
+            if items:
+                dump_json(items, default_file)
+                meta = self._load_meta()
+                if "默认词库" not in meta["order"]:
+                    meta["order"].append("默认词库")
+                    meta["enabled"]["默认词库"] = True
+                    self._save_meta(meta)
+                log.info("旧版词库已迁移为「默认词库」: %d 条", len(items))
+
+    def _load_meta(self) -> dict:
+        if self.meta_path.exists():
+            m = load_json(self.meta_path)
+            return {"order": m.get("order", []), "enabled": m.get("enabled", {})}
+        return {"order": [], "enabled": {}}
+
+    def _save_meta(self, meta: dict) -> None:
+        dump_json(meta, self.meta_path)
+
+    def _glossary_path(self, name: str) -> Path:
+        safe = "".join(c for c in name if c not in '/\\:*?"<>|').strip()
+        return self.root / f"{safe}.json"
+
+    def list(self) -> list[dict]:
+        """全部词库（按顺序），含启用状态与词条数。"""
+        meta = self._load_meta()
+        result = []
+        for name in meta["order"]:
+            path = self._glossary_path(name)
+            count = len(load_json(path)) if path.exists() else 0
+            result.append({"name": name, "enabled": meta["enabled"].get(name, True), "count": count})
+        return result
+
+    def create(self, name: str) -> dict:
+        name = name.strip()
+        if not name:
+            raise ValueError("词库名不能为空")
+        meta = self._load_meta()
+        if name in meta["order"]:
+            raise ValueError(f"词库已存在: {name}")
+        dump_json({}, self._glossary_path(name))
+        meta["order"].append(name)
+        meta["enabled"][name] = True
+        self._save_meta(meta)
+        return {"name": name, "enabled": True, "count": 0}
+
+    def set_enabled(self, name: str, enabled: bool) -> None:
+        meta = self._load_meta()
+        if name not in meta["order"]:
+            raise KeyError(f"词库不存在: {name}")
+        meta["enabled"][name] = bool(enabled)
+        self._save_meta(meta)
+
+    def delete(self, name: str) -> bool:
+        meta = self._load_meta()
+        if name not in meta["order"]:
+            return False
+        meta["order"].remove(name)
+        meta["enabled"].pop(name, None)
+        self._save_meta(meta)
+        self._glossary_path(name).unlink(missing_ok=True)
+        return True
+
+    def terms(self, name: str) -> dict[str, str]:
+        path = self._glossary_path(name)
+        return {k: v for k, v in load_json(path).items() if k and v} if path.exists() else {}
+
+    def set_term(self, name: str, src: str, tgt: str) -> None:
+        src, tgt = src.strip(), tgt.strip()
+        if not src or not tgt:
+            return
+        terms = self.terms(name)
+        terms[src] = tgt
+        dump_json(terms, self._glossary_path(name))
+
+    def delete_term(self, name: str, src: str) -> bool:
+        terms = self.terms(name)
+        if src not in terms:
+            return False
+        del terms[src]
+        dump_json(terms, self._glossary_path(name))
+        return True
+
+    def merged_items(self) -> dict[str, str]:
+        """合并所有启用词库（顺序后者覆盖前者 = 上方优先）。"""
+        merged: dict[str, str] = {}
+        for g in reversed(self.list()):
+            if g["enabled"]:
+                merged.update(self.terms(g["name"]))
+        # 兼容：旧版单文件未被迁移时兜底（仅默认根目录）
+        if not merged and self._default_root:
+            merged = GlossaryStore().items
+        return merged

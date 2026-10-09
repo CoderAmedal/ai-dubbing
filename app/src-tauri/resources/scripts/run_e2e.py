@@ -65,12 +65,15 @@ def run_pipeline(
     elastic_timeline: bool = False,
     settings: dict | None = None,
     progress: Callable[[int, str], None] | None = None,
+    output_mode: str = "video",
 ) -> None:
     """执行完整配音链路。
 
     settings: 可选，provider 配置 {"asr": {...}, "translate": {...}, "tts": {...}}。
     提供后三环节走 provider；缺省回退到旧参数（model_dir/tts_backend 等），保持 CLI 兼容。
     progress: 可选回调，签名 progress(percent: int, message: str)。
+    output_mode: "video"（默认，全流程出成片）| "src-srt"（只转写，出原文字幕）
+    | "bilingual-srt"（转写+翻译，出译文字幕，不配音）。
     """
 
     def emit(pct: int, msg: str) -> None:
@@ -122,6 +125,12 @@ def run_pipeline(
     dump_json(segments, seg_json)
     seg_json.with_suffix(".srt").write_text(to_srt(segments), encoding="utf-8")
 
+    if output_mode == "src-srt":
+        out_path.write_text(to_srt(segments), encoding="utf-8")
+        emit(100, "完成（原文字幕）")
+        log.info("=== 完成: %s ===", out_path)
+        return
+
     # 2. 多角色模式：提取各说话人参考音频（gpt-sovits）
     ref_map: dict | None = None
     sovits_mode = tts_backend == "gpt-sovits" or tts_cfg.get("provider") == "gpt-sovits"
@@ -158,6 +167,12 @@ def run_pipeline(
             emit(25 + int(15 * (i + 1) / n), f"翻译 {i + 1}/{n}")
     trans_json = work / "translations.json"
     dump_json(translated, trans_json)
+
+    if output_mode == "bilingual-srt":
+        make_srt(translated, out_path)
+        emit(100, "完成（双语字幕）")
+        log.info("=== 完成: %s ===", out_path)
+        return
 
     # 4. TTS
     tts_dir = work / "tts"
@@ -230,6 +245,54 @@ def run_pipeline(
     log.info("=== 完成: %s ===", out_path)
 
 
+def translate_srt_file(
+    srt_path: Path,
+    out_path: Path,
+    settings: dict | None = None,
+    progress: Callable[[int, str], None] | None = None,
+) -> None:
+    """翻译已有 SRT 字幕文件 → 译文字幕（"翻译已有字幕"流程）。"""
+    from step1_asr import parse_srt
+
+    def emit(pct: int, msg: str) -> None:
+        if progress:
+            progress(pct, msg)
+        log.info("[%3d%%] %s", pct, msg)
+
+    segments = parse_srt(srt_path)
+    if not segments:
+        raise ValueError(f"SRT 解析为空: {srt_path}")
+
+    tr_provider = None
+    tr_cfg: dict = {}
+    glossary: dict = {}
+    if settings:
+        from glossary import load_glossary
+        from providers.base import TranslateProvider
+        from providers.registry import get_provider, resolve_provider_config
+
+        tr_cfg = resolve_provider_config(settings, "translate")
+        if tr_cfg.get("provider"):
+            tr_provider = get_provider(tr_cfg["provider"], TranslateProvider)
+        glossary = load_glossary()
+
+    n = len(segments)
+    translated = []
+    for i, seg in enumerate(segments):
+        if tr_provider is not None:
+            tgt = tr_provider.translate(seg["text"], tr_cfg, glossary)
+            tgt = _apply_glossary_post(tgt, glossary)
+        else:
+            tgt = translate_text(seg["text"])
+        translated.append(
+            {"id": seg["id"], "start": seg["start"], "end": seg["end"], "src": seg["text"], "tgt": tgt}
+        )
+        emit(int(100 * (i + 1) / n), f"翻译 {i + 1}/{n}")
+
+    make_srt(translated, out_path)
+    log.info("=== SRT 翻译完成: %s ===", out_path)
+
+
 def main() -> None:
     setup_logging()
     parser = argparse.ArgumentParser(description="端到端配音链路")
@@ -256,7 +319,7 @@ def main() -> None:
     parser.add_argument(
         "--elastic-timeline",
         action="store_true",
-        help="弹性时间轴：中文语速自然优先（变速±15% + 长停顿裁剪）",
+        help="弹性时间轴：中文语速自然优先（变速±15%% + 长停顿裁剪）",
     )
     args = parser.parse_args()
 
